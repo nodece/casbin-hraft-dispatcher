@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/raft"
+	"github.com/nodece/casbin-hraft-dispatcher/command"
+	http3 "github.com/nodece/casbin-hraft-dispatcher/http"
+	"github.com/nodece/casbin-hraft-dispatcher/raft"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
@@ -19,8 +22,8 @@ type HRaftDispatcher struct {
 	client            *http.Client
 	logger            *zap.Logger
 	config            *DispatcherConfig
-	dispatcherBackend *DispatcherBackend
-	dispatcherStore   DispatcherStore
+	dispatcherBackend *http3.DispatcherBackend
+	dispatcherStore   raft.DispatcherStore
 }
 
 // NewHRaftDispatcher creates a HRaftDispatcher.
@@ -58,13 +61,13 @@ func (h *HRaftDispatcher) initialize() error {
 			TLSClientConfig: h.config.TLSConfig,
 		},
 	}
-	dispatcherStore, err := NewDispatcherStore(h.config)
+	dispatcherStore, err := raft.NewDispatcherStore(h.config)
 	if err != nil {
 		return err
 	}
 	h.dispatcherStore = dispatcherStore
 
-	dispatcherBackend, err := NewDispatcherBackend(h.config.HttpAddress, h.config.TLSConfig, dispatcherStore)
+	dispatcherBackend, err := http3.NewDispatcherBackend(h.config.HttpAddress, h.config.TLSConfig, dispatcherStore)
 	if err != nil {
 		return err
 	}
@@ -101,7 +104,7 @@ func (h *HRaftDispatcher) Stop() error {
 }
 
 // requestBackend requests the dispatcher backend.
-func (h *HRaftDispatcher) requestBackend(command Command) error {
+func (h *HRaftDispatcher) requestBackend(command command.Command) error {
 	b, _ := json.Marshal(command)
 	addr, _ := net.ResolveTCPAddr("tcp", h.config.HttpAddress)
 	resp, err := h.client.Post(fmt.Sprintf("https://%s:%d/commands", "127.0.0.1", addr.Port), "application/json", bytes.NewBuffer(b))
@@ -120,8 +123,8 @@ func (h *HRaftDispatcher) requestBackend(command Command) error {
 
 // AddPolicies adds policies to enforcer.
 func (h *HRaftDispatcher) AddPolicies(sec string, ptype string, rules [][]string) error {
-	command := Command{
-		Operation: AddOperation,
+	command := command.Command{
+		Operation: command.AddOperation,
 		Sec:       sec,
 		Ptype:     ptype,
 		Rules:     rules,
@@ -131,8 +134,8 @@ func (h *HRaftDispatcher) AddPolicies(sec string, ptype string, rules [][]string
 
 // RemovePolicies removes policies from enforcer.
 func (h *HRaftDispatcher) RemovePolicies(sec string, ptype string, rules [][]string) error {
-	command := Command{
-		Operation: RemoveOperation,
+	command := command.Command{
+		Operation: command.RemoveOperation,
 		Sec:       sec,
 		Ptype:     ptype,
 		Rules:     rules,
@@ -142,8 +145,8 @@ func (h *HRaftDispatcher) RemovePolicies(sec string, ptype string, rules [][]str
 
 // RemoveFilteredPolicy removes a role inheritance rule from the current named policy, field filters can be specified.
 func (h *HRaftDispatcher) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int, fieldValues ...string) error {
-	command := Command{
-		Operation:   RemoveFilteredOperation,
+	command := command.Command{
+		Operation:   command.RemoveFilteredOperation,
 		Sec:         sec,
 		Ptype:       ptype,
 		FieldIndex:  fieldIndex,
@@ -154,16 +157,16 @@ func (h *HRaftDispatcher) RemoveFilteredPolicy(sec string, ptype string, fieldIn
 
 // ClearPolicy clears all policy.
 func (h *HRaftDispatcher) ClearPolicy() error {
-	command := Command{
-		Operation: ClearOperation,
+	command := command.Command{
+		Operation: command.ClearOperation,
 	}
 	return h.requestBackend(command)
 }
 
 // UpdatePolicy updates policy rule from all instance.
 func (h *HRaftDispatcher) UpdatePolicy(sec string, ptype string, oldRule, newRule []string) error {
-	command := Command{
-		Operation: UpdateOperation,
+	command := command.Command{
+		Operation: command.UpdateOperation,
 		Sec:       sec,
 		Ptype:     ptype,
 		OldRule:   oldRule,
